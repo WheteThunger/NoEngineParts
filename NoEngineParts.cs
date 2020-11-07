@@ -5,12 +5,11 @@ using Oxide.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
 using Rust.Modular;
 
 namespace Oxide.Plugins
 {
-    [Info("No Engine Parts", "WhiteThunder", "0.1.0")]
+    [Info("No Engine Parts", "WhiteThunder", "1.0.0")]
     [Description("Allows modular cars to be driven without engine parts.")]
     internal class NoEngineParts : CovalencePlugin
     {
@@ -26,79 +25,77 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            foreach (var preset in pluginConfig.engineStatsRequiringPermission)
+            foreach (var preset in pluginConfig.presetsRequiringPermission)
                 if (!string.IsNullOrWhiteSpace(preset.name))
                     permission.RegisterPermission(GetPresetPermission(preset.name), this);
         }
 
-        private void OnServerInitialized(bool initialBoot)
+        private void OnEntityMounted(ModularCarSeat seat)
         {
-            if (!initialBoot)
-            {
-                foreach (var entity in BaseNetworkable.serverEntities)
-                {
-                    var engineModule = entity as VehicleModuleEngine;
-                    if (engineModule != null)
-                        OnEngineStatsRefresh(engineModule);
-                }
-            }
+            var car = seat.associatedSeatingModule.Vehicle as ModularCar;
+            if (car == null)
+                return;
+
+            // Only refresh engine loadout if engine cannot be started, else handle in OnEngineStarted
+            if (car.HasDriver() && !car.HasAnyWorkingEngines())
+                RefreshCarEngineLoadouts(car);
         }
 
-        // TODO: Use more precise hook only for EngineStorage when available
-        // Note: That hook won't be called on engine startup so this plugin should use the
-        // OnEngineStarted hook to update the loadout to avoid needing to hook permission/group changes
-        private object OnEngineStatsRefresh(VehicleModuleEngine engineModule)
+        private void OnEngineStarted(ModularCar car) =>
+            RefreshCarEngineLoadouts(car);
+
+        private object OnEngineLoadoutRefresh(EngineStorage engineStorage)
         {
-            var engineStats = DetermineEngineStatsForModule(engineModule);
-            if (engineStats == null)
+            var enginePreset = DetermineEnginePresetForStorage(engineStorage);
+            if (enginePreset == null)
                 return null;
 
-            if (OverrideStatsWasBlocked(engineModule))
-                return null;
+            if (TryRefreshEngineLoadout(engineStorage, enginePreset))
+                return false;
 
-            // Delay this because EngineStorage containers aren't created immediately after spawn
-            NextTick(() => TryApplyEngineStats(engineModule, engineStats));
-            return false;
+            return null;
         }
 
         #endregion
 
         #region Helper Methods
 
-        private bool OverrideStatsWasBlocked(VehicleModuleEngine engineModule)
+        private bool OverrideLoadoutWasBlocked(EngineStorage engineStorage)
         {
-            object hookResult = Interface.CallHook("OnEngineStatsOverride", engineModule);
+            object hookResult = Interface.CallHook("OnEngineLoadoutOverride", engineStorage);
             return hookResult is bool && (bool)hookResult == false;
         }
 
         private string GetPresetPermission(string presetName) => $"{PermissionPresetPrefix}.{presetName}";
 
-        private void TryApplyEngineStats(VehicleModuleEngine engineModule, EngineStats engineStats)
+        private void RefreshCarEngineLoadouts(ModularCar car)
         {
-            var engineStorage = engineModule.GetContainer() as EngineStorage;
-            if (engineStorage == null)
+            var enginePreset = DetermineEnginePresetForOwner(car.OwnerID);
+            if (enginePreset == null)
                 return;
 
-            RefreshEngineLoadout(engineStorage, engineStats);
+            foreach (var module in car.AttachedModuleEntities)
+            {
+                var engineModule = module as VehicleModuleEngine;
+                if (engineModule == null)
+                    continue;
 
-            engineModule.IsUsable = true;
-            engineModule.PerformanceFractionAcceleration = GetPerformanceFraction(engineModule, engineStorage.accelerationBoostPercent);
-            engineModule.PerformanceFractionTopSpeed = GetPerformanceFraction(engineModule, engineStorage.topSpeedBoostPercent);
-            engineModule.PerformanceFractionFuelEconomy = GetPerformanceFraction(engineModule, engineStorage.fuelEconomyBoostPercent);
-            engineModule.OverallPerformanceFraction = (engineModule.PerformanceFractionAcceleration +
-                engineModule.PerformanceFractionTopSpeed + engineModule.PerformanceFractionFuelEconomy) / 3f;
+                var engineStorage = engineModule.GetContainer() as EngineStorage;
+                if (engineStorage == null)
+                    continue;
+
+                TryRefreshEngineLoadout(engineStorage, enginePreset);
+            }
         }
 
-        private void RefreshEngineLoadout(EngineStorage engineStorage, EngineStats engineStats)
+        private bool TryRefreshEngineLoadout(EngineStorage engineStorage, EnginePreset enginePreset)
         {
+            if (OverrideLoadoutWasBlocked(engineStorage))
+                return false;
+
             var acceleration = 0f;
             var topSpeed = 0f;
             var fuelEconomy = 0f;
-
-            // TODO: Replace with corresponding fields of `EngineStorage` when they are made public
-            var accelerationSlots = 0f;
-            var topSpeedSlots = 0f;
-            var fuelEconomySlots = 0f;
 
             for (var slot = 0; slot < engineStorage.inventory.capacity; slot++)
             {
@@ -110,71 +107,51 @@ namespace Oxide.Plugins
                 {
                     var component = item.info.GetComponent<ItemModEngineItem>();
                     if (component != null)
-                        itemValue = item.amount * GetTierValue(component.tier);
+                        itemValue = item.amount * engineStorage.GetTierValue(component.tier);
                 }
 
                 if (engineItemType.BoostsAcceleration())
-                {
-                    accelerationSlots++;
-                    acceleration += Math.Max(itemValue, engineStats.acceleration);
-                }
+                    acceleration += Math.Max(itemValue, enginePreset.acceleration);
 
                 if (engineItemType.BoostsFuelEconomy())
-                {
-                    fuelEconomySlots++;
-                    fuelEconomy += Math.Max(itemValue, engineStats.fuelEconomy);
-                }
-                
+                    fuelEconomy += Math.Max(itemValue, enginePreset.fuelEconomy);
+
                 if (engineItemType.BoostsTopSpeed())
-                {
-                    topSpeedSlots++;
-                    topSpeed += Math.Max(itemValue, engineStats.topSpeed);
-                }
+                    topSpeed += Math.Max(itemValue, enginePreset.topSpeed);
             }
 
             engineStorage.isUsable = acceleration > 0 && topSpeed > 0 && fuelEconomy > 0;
-            engineStorage.accelerationBoostPercent = acceleration / accelerationSlots;
-            engineStorage.fuelEconomyBoostPercent = fuelEconomy / fuelEconomySlots;
-            engineStorage.topSpeedBoostPercent = topSpeed / topSpeedSlots;
+            engineStorage.accelerationBoostPercent = acceleration / engineStorage.accelerationBoostSlots;
+            engineStorage.fuelEconomyBoostPercent = fuelEconomy / engineStorage.fuelEconomyBoostSlots;
+            engineStorage.topSpeedBoostPercent = topSpeed / engineStorage.topSpeedBoostSlots;
             engineStorage.SendNetworkUpdate();
-        }
+            engineStorage.GetEngineModule()?.RefreshPerformanceStats(engineStorage);
 
-        // TODO: Replace with the `EngineStorage.GetTierValue(int)` method when it is made public
-        private float GetTierValue(int tier) =>
-            tier == 1 ? 0.6f :
-            tier == 2 ? 0.8f :
-            1;
-
-        // TODO: Replace with `EngineStorage.GetPerformanceFraction()` when it is made public
-        // Or remove when the more specific hook is being used
-        private float GetPerformanceFraction(VehicleModuleEngine engineModule, float statBoostPercent)
-        {
-            var healthFraction = engineModule.healthFraction;
-            return Mathf.Lerp(0, 0.25f, healthFraction) + (healthFraction != 0 ? statBoostPercent * 0.75f : 0);
+            return true;
         }
 
         #endregion
 
         #region Configuration
 
-        private EngineStats DetermineEngineStatsForModule(VehicleModuleEngine engineModule)
+        private EnginePreset DetermineEnginePresetForStorage(EngineStorage engineStorage)
         {
-            var car = engineModule.Vehicle;
+            var car = engineStorage.GetEngineModule()?.Vehicle as ModularCar;
             if (car == null)
-                return pluginConfig.defaultEngineStats;
+                return pluginConfig.defaultPreset;
 
-            return DetermineEngineStatsForOwner(car.OwnerID);
+            return DetermineEnginePresetForOwner(car.OwnerID);
         }
 
-        private EngineStats DetermineEngineStatsForOwner(ulong ownerId)
+        private EnginePreset DetermineEnginePresetForOwner(ulong ownerId)
         {
-            if (ownerId == 0 || pluginConfig.engineStatsRequiringPermission == null)
-                return pluginConfig.defaultEngineStats;
+            if (ownerId == 0 || pluginConfig.presetsRequiringPermission == null)
+                return pluginConfig.defaultPreset;
 
             var ownerIdString = ownerId.ToString();
-            for (var i = pluginConfig.engineStatsRequiringPermission.Length - 1; i >= 0; i--)
+            for (var i = pluginConfig.presetsRequiringPermission.Length - 1; i >= 0; i--)
             {
-                var preset = pluginConfig.engineStatsRequiringPermission[i];
+                var preset = pluginConfig.presetsRequiringPermission[i];
                 if (!string.IsNullOrWhiteSpace(preset.name) &&
                     permission.UserHasPermission(ownerIdString, GetPresetPermission(preset.name)))
                 {
@@ -182,60 +159,60 @@ namespace Oxide.Plugins
                 }
             }
 
-            return pluginConfig.defaultEngineStats;
+            return pluginConfig.defaultPreset;
         }
 
         private Configuration GetDefaultConfig() => new Configuration();
 
         internal class Configuration : SerializableConfiguration
         {
-            [JsonProperty("DefaultEngineStats")]
-            public EngineStats defaultEngineStats = new EngineStats()
+            [JsonProperty("DefaultPreset")]
+            public EnginePreset defaultPreset = new EnginePreset()
             {
                 acceleration = 0.3f,
                 topSpeed = 0.3f,
                 fuelEconomy = 0.3f,
             };
 
-            [JsonProperty("EngineStatsRequiringPermission")]
-            public EngineStats[] engineStatsRequiringPermission = new EngineStats[]
+            [JsonProperty("PresetsRequiringPermission")]
+            public EnginePreset[] presetsRequiringPermission = new EnginePreset[]
             {
-                new EngineStats ()
+                new EnginePreset ()
                 {
                     name = "tier1",
                     acceleration = 0.6f,
                     topSpeed = 0.6f,
                     fuelEconomy = 0.6f,
                 },
-                new EngineStats ()
+                new EnginePreset ()
                 {
                     name = "tier2",
                     acceleration = 0.8f,
                     topSpeed = 0.8f,
                     fuelEconomy = 0.8f,
                 },
-                new EngineStats ()
+                new EnginePreset ()
                 {
                     name = "tier3",
                     acceleration = 1,
                     topSpeed = 1,
                     fuelEconomy = 1,
                 },
-                new EngineStats ()
+                new EnginePreset ()
                 {
                     name = "tier4",
                     acceleration = 2,
                     topSpeed = 2,
                     fuelEconomy = 2,
                 },
-                new EngineStats()
+                new EnginePreset()
                 {
                     name = "tier5",
                     acceleration = 3,
                     topSpeed = 3,
                     fuelEconomy = 3,
                 },
-                new EngineStats()
+                new EnginePreset()
                 {
                     name = "tier6",
                     acceleration = 4,
@@ -245,7 +222,7 @@ namespace Oxide.Plugins
             };
         }
 
-        internal class EngineStats
+        internal class EnginePreset
         {
             [JsonProperty("Name", DefaultValueHandling = DefaultValueHandling.Ignore)]
             public string name;
