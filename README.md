@@ -9,6 +9,10 @@ All use cases can be applied globally to all cars, and/or to cars *owned* by pla
 
 Note: Cars still need fuel and engine *modules* to be driven. Changing that is out of scope for this plugin.
 
+## Alternative plugin
+
+The main criticism of this plugin has been that players will not necessarily realize that a car can be driven if the engine modules appear empty. To address this, the [Auto Engine Parts](https://umod.org/plugins/auto-engine-parts) plugin automatically fills engine modules with parts and also prevents players from removing them.
+
 ## Permissions
 
 Each entry in the `PresetsRequiringPermission` configuration option automatically generates a permission of format `noengineparts.preset.<name>`. Granting one to a player will cause cars they **own** to use the corresponding engine part stats as a minimum. Granting multiple permissions to a player will cause only the last one to apply (based on the order in the config).
@@ -22,7 +26,11 @@ The following permissions come with this plugin's **default configuration**.
 - `noengineparts.preset.tier5` -- Even higher quality
 - `noengineparts.preset.tier6` -- Extremely high quality
 
-Note: Vanilla Rust does not currently assign player ownership to vehicles, meaning only plugins do it. Most plugins that spawn cars for specific players will already assign that player as the owner. For other cars, players can obtain ownership using the [Claim Vehicle Ownership](https://umod.org/plugins/claim-vehicle-ownership) plugin.
+### How ownership works
+
+**There is no such thing as car ownership in the vanilla Rust.** You will need another plugin to assign ownership to cars in order for the permissions in this plugin to be effective.
+
+Car ownership is determined by the `OwnerID` property of the car, which is usually a player's Steam ID, or `0` for no owner. Most plugins that spawn cars for a player (such as [Craft Car Chassis](https://umod.org/plugins/craft-car-chassis) and [Spawn Modular Car](https://umod.org/plugins/spawn-modular-car)) will assign that player as the owner. For cars spawned by the vanilla game, it's recommended to use [Claim Vehicle Ownership](https://umod.org/plugins/claim-vehicle-ownership) to allow players to claim them with a command on cooldown.
 
 ## Configuration
 
