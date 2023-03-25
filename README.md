@@ -30,7 +30,7 @@ The following permissions come with this plugin's **default configuration**.
 
 **There is no such thing as car ownership in the vanilla Rust.** You will need another plugin to assign ownership to cars in order for the permissions in this plugin to be effective.
 
-Car ownership is determined by the `OwnerID` property of the car, which is usually a player's Steam ID, or `0` for no owner. Most plugins that spawn cars for a player (such as [Craft Car Chassis](https://umod.org/plugins/craft-car-chassis) and [Spawn Modular Car](https://umod.org/plugins/spawn-modular-car)) will assign that player as the owner. For cars spawned by the vanilla game, it's recommended to use [Claim Vehicle Ownership](https://umod.org/plugins/claim-vehicle-ownership) to allow players to claim them with a command on cooldown.
+Car ownership is determined by the `OwnerID` property of the car, which is usually a player's Steam ID, or `0` for no owner. Most plugins that spawn cars for a player (such as [Craft Car Chassis](https://umod.org/plugins/craft-car-chassis) and [Spawn Modular Car](https://umod.org/plugins/spawn-modular-car)) will assign that player as the owner. For cars spawned by the vanilla game, it's recommended to use [Claim Vehicle](https://umod.org/plugins/claim-vehicle) to allow players to claim them with a command on cooldown.
 
 ## Configuration
 
