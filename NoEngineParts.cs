@@ -9,7 +9,7 @@ using Rust.Modular;
 
 namespace Oxide.Plugins
 {
-    [Info("No Engine Parts", "WhiteThunder", "1.0.0")]
+    [Info("No Engine Parts", "WhiteThunder", "1.0.1")]
     [Description("Allows modular cars to be driven without engine parts.")]
     internal class NoEngineParts : CovalencePlugin
     {
@@ -32,7 +32,7 @@ namespace Oxide.Plugins
 
         private void OnEntityMounted(ModularCarSeat seat)
         {
-            var car = seat.associatedSeatingModule.Vehicle as ModularCar;
+            var car = seat.associatedSeatingModule?.Vehicle as ModularCar;
             if (car == null)
                 return;
 
